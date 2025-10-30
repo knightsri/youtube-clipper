@@ -1,0 +1,50 @@
+# Archive files
+*.zip
+*.tar.gz
+Archive/
+
+# Data and downloads
+data/
+downloads/
+
+# Cookies (sensitive)
+cookies.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Flask
+instance/
+.env
+.flaskenv
+
+# Docker
+.dockerignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+
+# Test files
+test_app.py
+debug-*.sh
+test-*.sh

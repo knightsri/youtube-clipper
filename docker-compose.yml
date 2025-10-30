@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  youtube-clipper:
+    build: .
+    container_name: youtube-clipper
+    ports:
+      - "5000:5000"
+    volumes:
+      # Mount entire application directory
+      - .:/opt
+      # Persistent data storage
+      - ./data:/data
+      # Mount cookies.txt if it exists (writable so yt-dlp can update it)
+      - ./cookies.txt:/opt/cookies.txt
+    restart: unless-stopped
+    environment:
+      - FLASK_ENV=development
+      - PYTHONUNBUFFERED=1
