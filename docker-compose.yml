@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  youtube-clipper:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/data
+      - .:/app  # Mount current directory for live code updates (includes cookies.txt)
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+    restart: unless-stopped

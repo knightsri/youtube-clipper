@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Video Clipper</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎵 YouTube Video Clipper</h1>
+        </header>
+
+        <div class="input-section">
+            <div class="input-group">
+                <input type="text" id="videoUrl" placeholder="YouTube URL or Video ID">
+                <button id="addVideoBtn">Add Video</button>
+            </div>
+            
+            <div class="controls">
+                <button id="recoverClipsBtn">Recover Clips (<span id="clipsSize">0</span> MB)</button>
+                <button id="recoverAllBtn">Recover All (<span id="allSize">0</span> MB)</button>
+            </div>
+            
+            <!-- Status messages area -->
+            <div id="statusArea" class="status-area" style="display: none;">
+                <div id="statusMessage" class="status-message"></div>
+            </div>
+        </div>
+
+        <div class="library-section">
+            <div class="library-header">
+                <h2>VIDEO LIBRARY</h2>
+                <div class="library-controls">
+                    <button id="expandAllBtn">Expand All</button>
+                    <button id="collapseAllBtn">Collapse All</button>
+                </div>
+            </div>
+            <div id="videoLibrary" class="video-library">
+                <!-- Video cards will be dynamically added here -->
+            </div>
+        </div>
+
+        <div class="merge-section">
+            <h2>MERGE SELECTED ITEMS</h2>
+            
+            <div class="merge-controls">
+                <div class="merge-type-control">
+                    <label><strong>Merge Type:</strong></label>
+                    <div class="radio-group">
+                        <label>
+                            <input type="radio" name="mergeType" value="audio_only" id="mergeTypeAudio" checked>
+                            Audio Only (Fast)
+                        </label>
+                        <label>
+                            <input type="radio" name="mergeType" value="video_only" id="mergeTypeVideo">
+                            Video Only (Slow - Re-encodes)
+                        </label>
+                        <label>
+                            <input type="radio" name="mergeType" value="both" id="mergeTypeBoth">
+                            Both (Slowest - Re-encodes Video)
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="merge-gap-control" id="gapControl">
+                    <label>
+                        Gap between clips (Audio only):
+                        <input type="number" id="gapSeconds" value="0.5" step="0.1" min="0" max="10">
+                        seconds
+                    </label>
+                </div>
+                
+                <div class="merge-title-control">
+                    <label>
+                        <strong>Merge Title</strong> (optional - defaults to timestamp):
+                        <input type="text" id="mergeTitle" placeholder="e.g., Final Lecture Compilation">
+                    </label>
+                </div>
+            </div>
+            
+            <div id="mergePreview" class="merge-preview">
+                <p class="no-selection">No items selected. Check items above and assign order numbers to merge.</p>
+            </div>
+            <button id="createMergeBtn" class="merge-btn" disabled>Create Merged Audio</button>
+            <div id="mergedOutput" class="merged-output">
+                <!-- Merged results will appear here -->
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
