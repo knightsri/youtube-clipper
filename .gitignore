@@ -49,3 +49,6 @@ cookies.txt
 
 # Logs
 *.log
+
+# AI assistant configuration (local only)
+CLAUDE.md
