@@ -91,6 +91,11 @@ def get_directory_size_mb(directory):
 def index():
     return render_template('index.html')
 
+@app.route('/static/manifest.json')
+def manifest():
+    """Serve PWA manifest"""
+    return send_file('static/manifest.json', mimetype='application/manifest+json')
+
 # ============================================================================
 # Video Management
 # ============================================================================
@@ -101,7 +106,8 @@ def add_video():
     try:
         data = request.json
         url = data.get('url', '').strip()
-        
+        quality = data.get('quality', 'best')  # Default to 'best'
+
         video_id = extract_video_id(url)
         if not video_id:
             return jsonify({'error': 'Invalid YouTube URL or Video ID'}), 400
@@ -134,10 +140,24 @@ def add_video():
             tmp_cookies = Path('/tmp/cookies.txt')
             shutil.copy(COOKIES_FILE, tmp_cookies)
             app.logger.info(f'Copied cookies to {tmp_cookies}')
-        
+
+        # Format selection based on quality
+        if quality == 'best':
+            format_string = 'best'
+        elif quality == '360':
+            format_string = 'best[height<=360]'
+        elif quality == '480':
+            format_string = 'best[height<=480]'
+        elif quality == '720':
+            format_string = 'best[height<=720]'
+        elif quality == '1080':
+            format_string = 'best[height<=1080]'
+        else:
+            format_string = 'best'  # Fallback
+
         cmd = [
             'yt-dlp',
-            '-f', 'best',  # V1's simple format selection - WORKS
+            '-f', format_string,
             '-o', str(video_path),
         ]
         
@@ -236,6 +256,7 @@ def add_video():
             'title_source': 'youtube' if title != video_id else 'fallback',
             'duration_seconds': duration_seconds,
             'duration_formatted': seconds_to_time(duration_seconds),
+            'quality': quality,
             'added_date': datetime.now().isoformat(),
             'clips': [],
             'next_clip_id': 1
@@ -329,11 +350,13 @@ def create_clip(video_id):
         metadata = get_video_metadata(video_id)
         if not metadata:
             return jsonify({'error': 'Video not found'}), 404
-        
+
         data = request.json
         start_time = data.get('start_time', '')
         end_time = data.get('end_time', '')
-        
+        use_fade = data.get('use_fade', False)
+        fade_duration = float(data.get('fade_duration', 1.0))
+
         start_seconds = parse_time_to_seconds(start_time)
         end_seconds = parse_time_to_seconds(end_time)
         
@@ -369,7 +392,7 @@ def create_clip(video_id):
         if result.returncode != 0:
             return jsonify({'error': f'Video clip creation failed: {result.stderr}'}), 500
         
-        # Extract audio clip
+        # Extract audio clip with optional fade
         cmd = [
             'ffmpeg',
             '-i', str(video_path),
@@ -377,11 +400,17 @@ def create_clip(video_id):
             '-t', str(duration),
             '-vn',
             '-acodec', 'libmp3lame',
-            '-q:a', '2',
-            '-y',
-            str(clip_audio_path)
+            '-q:a', '2'
         ]
-        
+
+        # Add fade audio filter if requested
+        if use_fade:
+            fade_out_start = max(0, duration - fade_duration)
+            fade_filter = f"afade=t=in:st=0:d={fade_duration},afade=t=out:st={fade_out_start}:d={fade_duration}"
+            cmd.extend(['-af', fade_filter])
+
+        cmd.extend(['-y', str(clip_audio_path)])
+
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             clip_video_path.unlink(missing_ok=True)
@@ -397,6 +426,8 @@ def create_clip(video_id):
             'end_seconds': end_seconds,
             'duration_seconds': duration,
             'duration_formatted': seconds_to_time(duration),
+            'use_fade': use_fade,
+            'fade_duration': fade_duration if use_fade else None,
             'created_date': datetime.now().isoformat()
         }
         
@@ -481,6 +512,9 @@ def create_merge():
         gap_seconds = float(data.get('gap_seconds', 0.5))
         merge_type = data.get('merge_type', 'audio_only')  # audio_only, video_only, both
         title = data.get('title')  # Optional custom title
+        use_fade = data.get('use_fade', False)
+        fade_duration = float(data.get('fade_duration', 1.0))
+        use_normalize = data.get('use_normalize', False)
         
         if not items:
             return jsonify({'error': 'No items selected for merge'}), 400
@@ -514,18 +548,19 @@ def create_merge():
         video_entries = []
         audio_entries = []
         total_duration = 0
-        
+        normalized_audio_files = []  # Track normalized files for cleanup
+
         for idx, item in enumerate(items):
             video_id = item['video_id']
             clip_id = item.get('clip_id')
-            
+
             video_dir = DATA_DIR / video_id
-            
+
             if clip_id is not None:
                 # It's a clip
                 video_path = video_dir / f"{video_id}_clip{clip_id}.mp4"
                 audio_path = video_dir / f"{video_id}_clip{clip_id}.mp3"
-                
+
                 metadata = get_video_metadata(video_id)
                 clip_data = next((c for c in metadata['clips'] if c['clip_id'] == clip_id), None)
                 if clip_data:
@@ -534,16 +569,43 @@ def create_merge():
                 # It's the full video
                 video_path = video_dir / f"{video_id}.mp4"
                 audio_path = video_dir / 'original_audio.mp3'
-                
+
                 metadata = get_video_metadata(video_id)
                 total_duration += metadata['duration_seconds']
-            
+
             if not video_path.exists() or not audio_path.exists():
                 return jsonify({'error': f'Missing file for {video_id}'}), 400
-            
+
             video_entries.append(f"file '{video_path}'")
-            audio_entries.append(f"file '{audio_path}'")
-            
+
+            # Normalize audio if requested
+            if use_normalize and merge_type in ['audio_only', 'both']:
+                normalized_path = merged_dir / f'normalized_{timestamp}_{idx}.mp3'
+                normalized_audio_files.append(normalized_path)
+
+                # Apply loudnorm filter
+                cmd = [
+                    'ffmpeg',
+                    '-i', str(audio_path),
+                    '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
+                    '-acodec', 'libmp3lame',
+                    '-q:a', '2',
+                    '-y',
+                    str(normalized_path)
+                ]
+
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    app.logger.error(f'Audio normalization failed: {result.stderr}')
+                    # Clean up normalized files
+                    for nf in normalized_audio_files:
+                        nf.unlink(missing_ok=True)
+                    return jsonify({'error': f'Audio normalization failed: {result.stderr}'}), 500
+
+                audio_entries.append(f"file '{normalized_path}'")
+            else:
+                audio_entries.append(f"file '{audio_path}'")
+
             # Add gap to audio only (except after last item)
             if idx < len(items) - 1 and gap_seconds > 0:
                 audio_entries.append(f"file '{silent_audio}'")
@@ -585,12 +647,19 @@ def create_merge():
                 'ffmpeg',
                 '-f', 'concat',
                 '-safe', '0',
-                '-i', str(audio_list_file),
-                '-c', 'copy',
-                '-y',
-                str(merged_audio_path)
+                '-i', str(audio_list_file)
             ]
-            
+
+            # Apply fade if requested
+            if use_fade:
+                fade_out_start = max(0, total_duration - fade_duration)
+                fade_filter = f"afade=t=in:st=0:d={fade_duration},afade=t=out:st={fade_out_start}:d={fade_duration}"
+                cmd.extend(['-af', fade_filter, '-acodec', 'libmp3lame', '-q:a', '2'])
+            else:
+                cmd.extend(['-c', 'copy'])
+
+            cmd.extend(['-y', str(merged_audio_path)])
+
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode != 0:
                 app.logger.error(f'Audio merge failed: {result.stderr}')
@@ -603,6 +672,9 @@ def create_merge():
         audio_list_file.unlink(missing_ok=True)
         if silent_audio:
             silent_audio.unlink(missing_ok=True)
+        # Clean up normalized audio files
+        for nf in normalized_audio_files:
+            nf.unlink(missing_ok=True)
         
         # Save metadata for this merge
         metadata = {
