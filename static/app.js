@@ -38,25 +38,116 @@ function loadState() {
 }
 
 // ============================================================================
+// Playback Speed Control
+// ============================================================================
+
+function setPlaybackSpeed(element, speed) {
+    element.playbackRate = speed;
+    localStorage.setItem('playbackSpeed', speed);
+}
+
+function loadPlaybackSpeed() {
+    const savedSpeed = localStorage.getItem('playbackSpeed');
+    return savedSpeed ? parseFloat(savedSpeed) : 1.0;
+}
+
+function applyPlaybackSpeedToAll() {
+    const speed = loadPlaybackSpeed();
+    document.querySelectorAll('video, audio').forEach(media => {
+        media.playbackRate = speed;
+    });
+    // Update all speed selectors
+    document.querySelectorAll('.speed-selector').forEach(selector => {
+        selector.value = speed;
+    });
+}
+
+function createSpeedControl(mediaId) {
+    const speed = loadPlaybackSpeed();
+    return `
+        <div class="speed-control">
+            <label>Speed:</label>
+            <select class="speed-selector" onchange="setPlaybackSpeed(document.getElementById('${mediaId}'), this.value); this.blur();">
+                <option value="0.5" ${speed === 0.5 ? 'selected' : ''}>0.5x</option>
+                <option value="0.75" ${speed === 0.75 ? 'selected' : ''}>0.75x</option>
+                <option value="1" ${speed === 1 ? 'selected' : ''}>1x</option>
+                <option value="1.25" ${speed === 1.25 ? 'selected' : ''}>1.25x</option>
+                <option value="1.5" ${speed === 1.5 ? 'selected' : ''}>1.5x</option>
+                <option value="2" ${speed === 2 ? 'selected' : ''}>2x</option>
+            </select>
+        </div>
+    `;
+}
+
+// Expose to window
+window.setPlaybackSpeed = setPlaybackSpeed;
+
+// ============================================================================
+// Dark Mode
+// ============================================================================
+
+function toggleDarkMode() {
+    const root = document.documentElement;
+    const icon = document.getElementById('darkModeIcon');
+
+    root.classList.toggle('dark-mode');
+
+    if (root.classList.contains('dark-mode')) {
+        localStorage.setItem('theme', 'dark');
+        icon.textContent = '☀️';
+    } else {
+        localStorage.setItem('theme', 'light');
+        icon.textContent = '🌙';
+    }
+}
+
+function loadDarkMode() {
+    const savedTheme = localStorage.getItem('theme');
+    const root = document.documentElement;
+    const icon = document.getElementById('darkModeIcon');
+
+    if (savedTheme === 'dark') {
+        root.classList.add('dark-mode');
+        if (icon) icon.textContent = '☀️';
+    }
+}
+
+// Expose to window
+window.toggleDarkMode = toggleDarkMode;
+
+// ============================================================================
 // Initialization
 // ============================================================================
 
 document.addEventListener('DOMContentLoaded', async () => {
+    // Load dark mode preference
+    loadDarkMode();
+
+    // Register service worker for PWA
+    if ('serviceWorker' in navigator) {
+        try {
+            await navigator.serviceWorker.register('/static/sw.js');
+            console.log('Service Worker registered successfully');
+        } catch (error) {
+            console.log('Service Worker registration failed:', error);
+        }
+    }
+
     // Load existing videos
     await loadVideos();
-    
+
     // Load existing merged files
     await loadMergedFiles();
-    
+
     // Apply saved video order
     loadState();
-    
+
     // Update storage info
     await updateStorage();
-    
+
     // Setup event listeners
     setupEventListeners();
-    
+
     // Render initial state
     renderLibrary();
 });
@@ -187,24 +278,26 @@ function hideStatus() {
 async function addVideo() {
     const input = document.getElementById('videoUrl');
     const url = input.value.trim();
-    
+    const qualitySelect = document.getElementById('videoQuality');
+    const quality = qualitySelect.value;
+
     if (!url) {
         showError('Please enter a YouTube URL or Video ID');
         return;
     }
-    
+
     const btn = document.getElementById('addVideoBtn');
     const originalText = btn.textContent;
     btn.textContent = 'Adding...';
     btn.disabled = true;
-    
+
     // Show status message
-    showStatus('Downloading video from YouTube... This may take a few minutes depending on video size.');
-    
+    showStatus(`Downloading video from YouTube in ${quality === 'best' ? 'best' : quality + 'p'} quality... This may take a few minutes depending on video size.`);
+
     try {
         const data = await apiCall('/api/add-video', {
             method: 'POST',
-            body: JSON.stringify({ url })
+            body: JSON.stringify({ url, quality })
         });
         
         // Update status
@@ -333,26 +426,32 @@ function collapseAll() {
 async function createClip(videoId) {
     const startInput = document.getElementById(`start-${videoId}`);
     const endInput = document.getElementById(`end-${videoId}`);
-    
+    const fadeCheckbox = document.getElementById(`fade-${videoId}`);
+    const fadeDurationInput = document.getElementById(`fade-duration-${videoId}`);
+
     const startTime = startInput.value.trim();
     const endTime = endInput.value.trim();
-    
+    const useFade = fadeCheckbox.checked;
+    const fadeDuration = parseFloat(fadeDurationInput.value);
+
     if (!startTime || !endTime) {
         showError('Please enter both start and end times');
         return;
     }
-    
+
     const btn = document.getElementById(`create-clip-${videoId}`);
     const originalText = btn.textContent;
     btn.textContent = 'Creating...';
     btn.disabled = true;
-    
+
     try {
         const data = await apiCall(`/api/video/${videoId}/clip`, {
             method: 'POST',
             body: JSON.stringify({
                 start_time: startTime,
-                end_time: endTime
+                end_time: endTime,
+                use_fade: useFade,
+                fade_duration: fadeDuration
             })
         });
         
@@ -625,15 +724,21 @@ function updateMergePreview() {
 function updateMergeTypeUI() {
     const mergeType = document.querySelector('input[name="mergeType"]:checked').value;
     const gapControl = document.getElementById('gapControl');
+    const fadeControl = document.getElementById('fadeControl');
+    const normalizeControl = document.getElementById('normalizeControl');
     const mergeBtn = document.getElementById('createMergeBtn');
-    
-    // Show gap control only for audio_only or both
+
+    // Show gap, fade, and normalize controls only for audio_only or both
     if (mergeType === 'audio_only' || mergeType === 'both') {
         gapControl.style.display = 'block';
+        fadeControl.style.display = 'flex';
+        normalizeControl.style.display = 'block';
     } else {
         gapControl.style.display = 'none';
+        fadeControl.style.display = 'none';
+        normalizeControl.style.display = 'none';
     }
-    
+
     // Update button text based on merge type
     const isDisabled = mergeBtn.disabled;
     if (mergeType === 'audio_only') {
@@ -651,15 +756,18 @@ async function createMerge() {
         showError('No items selected for merge');
         return;
     }
-    
+
     const btn = document.getElementById('createMergeBtn');
     const originalText = btn.textContent;
     btn.textContent = 'Merging...';
     btn.disabled = true;
-    
+
     const mergeType = document.querySelector('input[name="mergeType"]:checked').value;
     const gapSeconds = parseFloat(document.getElementById('gapSeconds').value || 0.5);
     const mergeTitle = document.getElementById('mergeTitle').value.trim();
+    const useFade = document.getElementById('mergeFade').checked;
+    const fadeDuration = parseFloat(document.getElementById('mergeFadeDuration').value);
+    const useNormalize = document.getElementById('mergeNormalize').checked;
     
     // Show appropriate status message based on merge type
     if (mergeType === 'audio_only') {
@@ -677,7 +785,10 @@ async function createMerge() {
                 items: appState.selectedItems,
                 gap_seconds: gapSeconds,
                 merge_type: mergeType,
-                title: mergeTitle || null
+                title: mergeTitle || null,
+                use_fade: useFade,
+                fade_duration: fadeDuration,
+                use_normalize: useNormalize
             })
         });
         
@@ -705,27 +816,31 @@ async function createMerge() {
 
 function displayMergedOutput(data, mergeType) {
     const output = document.getElementById('mergedOutput');
-    
+
     let videoPlayer = '';
     let audioPlayer = '';
-    
+
     if (mergeType === 'video_only' || mergeType === 'both') {
+        const videoId = `merged-video-${data.timestamp}`;
         videoPlayer = `
             <div class="player-container">
-                <video controls>
+                <video id="${videoId}" controls onloadedmetadata="this.playbackRate = loadPlaybackSpeed()">
                     <source src="/api/file/merged/${data.video_filename}" type="video/mp4">
                 </video>
+                ${createSpeedControl(videoId)}
                 <a href="/api/download/merged/${data.video_filename}" class="download-btn">Download MP4</a>
             </div>
         `;
     }
-    
+
     if (mergeType === 'audio_only' || mergeType === 'both') {
+        const audioId = `merged-audio-${data.timestamp}`;
         audioPlayer = `
             <div class="player-container">
-                <audio controls>
+                <audio id="${audioId}" controls onloadedmetadata="this.playbackRate = loadPlaybackSpeed()">
                     <source src="/api/file/merged/${data.audio_filename}" type="audio/mpeg">
                 </audio>
+                ${createSpeedControl(audioId)}
                 <a href="/api/download/merged/${data.audio_filename}" class="download-btn">Download MP3</a>
             </div>
         `;
@@ -758,29 +873,33 @@ function displayMergedOutput(data, mergeType) {
 
 function displayExistingMergedOutput(file) {
     const output = document.getElementById('mergedOutput');
-    
+
     let videoPlayer = '';
     let audioPlayer = '';
-    
+
     // Check if video file exists
     if (file.video_filename) {
+        const videoId = `merged-video-${file.timestamp}`;
         videoPlayer = `
             <div class="player-container">
-                <video controls>
+                <video id="${videoId}" controls onloadedmetadata="this.playbackRate = loadPlaybackSpeed()">
                     <source src="/api/file/merged/${file.video_filename}" type="video/mp4">
                 </video>
+                ${createSpeedControl(videoId)}
                 <a href="/api/download/merged/${file.video_filename}" class="download-btn">Download MP4</a>
             </div>
         `;
     }
-    
+
     // Check if audio file exists
     if (file.audio_filename) {
+        const audioId = `merged-audio-${file.timestamp}`;
         audioPlayer = `
             <div class="player-container">
-                <audio controls>
+                <audio id="${audioId}" controls onloadedmetadata="this.playbackRate = loadPlaybackSpeed()">
                     <source src="/api/file/merged/${file.audio_filename}" type="audio/mpeg">
                 </audio>
+                ${createSpeedControl(audioId)}
                 <a href="/api/download/merged/${file.audio_filename}" class="download-btn">Download MP3</a>
             </div>
         `;
@@ -986,11 +1105,13 @@ function renderVideoCard(video) {
 function renderOriginalSection(video) {
     const selected = isSelected(video.video_id);
     const order = getOrder(video.video_id);
-    
+    const qualityBadge = video.quality ? `<span class="quality-badge">${video.quality === 'best' ? 'Best Quality' : video.quality + 'p'}</span>` : '';
+
     return `
         <div class="original-section">
             <h3 class="section-title">
                 ORIGINAL VIDEO/AUDIO
+                ${qualityBadge}
                 <span class="video-id-badge" onclick="copyVideoId('${video.video_id}')" title="Click to copy video ID">
                     ${video.video_id}
                 </span>
@@ -1009,15 +1130,17 @@ function renderOriginalSection(video) {
             </div>
             <div class="players">
                 <div class="player-container">
-                    <video id="video-${video.video_id}" controls>
+                    <video id="video-${video.video_id}" controls onloadedmetadata="this.playbackRate = loadPlaybackSpeed()">
                         <source src="/api/file/${video.video_id}/${video.video_id}.mp4" type="video/mp4">
                     </video>
+                    ${createSpeedControl('video-' + video.video_id)}
                     <a href="/api/download/${video.video_id}/${video.video_id}.mp4" class="download-btn">Download MP4</a>
                 </div>
                 <div class="player-container">
-                    <audio controls>
+                    <audio id="audio-${video.video_id}" controls onloadedmetadata="this.playbackRate = loadPlaybackSpeed()">
                         <source src="/api/file/${video.video_id}/original_audio.mp3" type="audio/mpeg">
                     </audio>
+                    ${createSpeedControl('audio-' + video.video_id)}
                     <a href="/api/download/${video.video_id}/original_audio.mp3" class="download-btn">Download MP3</a>
                 </div>
             </div>
@@ -1065,15 +1188,17 @@ function renderClipCard(video, clip) {
             </div>
             <div class="players">
                 <div class="player-container">
-                    <video controls>
+                    <video id="video-${video.video_id}-clip${clip.clip_id}" controls onloadedmetadata="this.playbackRate = loadPlaybackSpeed()">
                         <source src="/api/file/${video.video_id}/${video.video_id}_clip${clip.clip_id}.mp4" type="video/mp4">
                     </video>
+                    ${createSpeedControl('video-' + video.video_id + '-clip' + clip.clip_id)}
                     <a href="/api/download/${video.video_id}/${video.video_id}_clip${clip.clip_id}.mp4" class="download-btn">Download MP4</a>
                 </div>
                 <div class="player-container">
-                    <audio controls>
+                    <audio id="audio-${video.video_id}-clip${clip.clip_id}" controls onloadedmetadata="this.playbackRate = loadPlaybackSpeed()">
                         <source src="/api/file/${video.video_id}/${video.video_id}_clip${clip.clip_id}.mp3" type="audio/mpeg">
                     </audio>
+                    ${createSpeedControl('audio-' + video.video_id + '-clip' + clip.clip_id)}
                     <a href="/api/download/${video.video_id}/${video.video_id}_clip${clip.clip_id}.mp3" class="download-btn">Download MP3</a>
                 </div>
             </div>
@@ -1100,6 +1225,17 @@ function renderClipCreation(video) {
                         <button class="mark-btn" onclick="markTime('${video.video_id}', 'end')">Mark End</button>
                     </div>
                 </div>
+            </div>
+            <div class="fade-controls">
+                <label class="fade-checkbox">
+                    <input type="checkbox" id="fade-${video.video_id}">
+                    <span>Add fade in/out</span>
+                </label>
+                <label class="fade-duration">
+                    Fade duration:
+                    <input type="number" id="fade-duration-${video.video_id}" value="1" min="0.5" max="3" step="0.5">
+                    seconds
+                </label>
             </div>
             <button id="create-clip-${video.video_id}" class="create-clip-btn" onclick="createClip('${video.video_id}')">Create Clip</button>
         </div>
